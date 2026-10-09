@@ -27,9 +27,9 @@ dependencies = []
 
 [project.urls]
 Homepage = "https://kiomon.com"
-Repository = "https://github.com/kiomonai/python-sdk"
-Issues = "https://github.com/kiomonai/python-sdk/issues"
-Changelog = "https://github.com/kiomonai/python-sdk/releases"
+Repository = "https://github.com/kiomon-hq/python-sdk"
+Issues = "https://github.com/kiomon-hq/python-sdk/issues"
+Changelog = "https://github.com/kiomon-hq/python-sdk/releases"
 Documentation = "https://kiomon.com/docs"
 
 [dependency-groups]
