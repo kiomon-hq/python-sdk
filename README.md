@@ -250,6 +250,19 @@ both clients are context managers (`with` / `async with`) that call the transpor
   real, and an invalid argument surfaces when the call is awaited (nothing is sent)
   rather than before the call as it does in the sync client.
 
+## Development
+
+```bash
+uv sync                       # create the venv and install the dev group
+uv run pytest                 # the test suite
+uv run ruff check .           # lint
+uv run mypy                   # types
+```
+
+No runtime dependencies, so the venv holds only the tooling. `mypy` runs in strict mode
+over `src/kiomon`; the tests use `pythonpath = ["src"]` from `pyproject.toml`, so no
+install step is needed before running them.
+
 ## Status
 
 `0.1.0`. Complete against the shipped API. The sync and async clients share one
