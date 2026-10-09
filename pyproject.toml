@@ -1,0 +1,79 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "kiomon"
+dynamic = ["version"]
+description = "Kiomon SDK — persistent memory for AI agents and apps. Capture, retrieve and govern memories from your own product."
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Kiomon" }]
+keywords = ["kiomon", "memory", "ai", "agents", "mcp", "rag", "context"]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Typing :: Typed",
+]
+dependencies = []
+
+[project.urls]
+Homepage = "https://kiomon.com"
+Repository = "https://github.com/kiomon-hq/python-sdk"
+Issues = "https://github.com/kiomon-hq/python-sdk/issues"
+Changelog = "https://github.com/kiomon-hq/python-sdk/releases"
+Documentation = "https://kiomon.com/docs"
+
+[dependency-groups]
+dev = [
+  "pytest>=8.0",
+  "mypy>=1.11",
+  "ruff>=0.6",
+]
+
+[tool.hatch.version]
+path = "src/kiomon/_version.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/kiomon"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+  "/src",
+  "/tests",
+  "/README.md",
+  "/RELEASING.md",
+  "/LICENSE",
+  "/pyproject.toml",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+ignore = ["E501"]
+
+[tool.mypy]
+python_version = "3.10"
+files = ["src/kiomon"]
+warn_unused_configs = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+no_implicit_optional = true
+check_untyped_defs = true
+disallow_untyped_defs = true
