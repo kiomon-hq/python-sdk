@@ -1,6 +1,6 @@
 # kiomon
 
-[![CI](https://github.com/kiomon-hq/python-sdk/actions/workflows/ci.yml/badge.svg)](https://github.com/kiomon-hq/python-sdk/actions/workflows/ci.yml)
+[![CI](https://github.com/kiomonai/python-sdk/actions/workflows/ci.yml/badge.svg)](https://github.com/kiomonai/python-sdk/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 The Kiomon Python SDK — persistent memory for AI agents and apps. Capture what your
