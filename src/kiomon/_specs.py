@@ -22,14 +22,21 @@ from typing import Any
 from urllib.parse import quote, urlencode
 
 from ._transport import Response
+from ._version import __version__
 from .errors import KiomonError, error_from_response
 from .types import CallOptions
 
 __all__ = [
+    "DOCUMENT_SORTS",
+    "DOCUMENT_STATUSES",
+    "INDEX_STATUSES",
     "LEARNING_KINDS",
     "MANAGE_ACTIONS",
+    "MAX_DOCUMENT_LIMIT",
     "MAX_LEARNINGS_PER_CALL",
     "MAX_RETRIEVAL_LIMIT",
+    "MEMORY_KINDS",
+    "USER_AGENT",
     "Spec",
     "backoff_seconds",
     "batch_draft_spec",
@@ -37,11 +44,15 @@ __all__ = [
     "build_headers",
     "build_url",
     "context_spec",
+    "create_workspace_spec",
+    "delete_document_spec",
     "generate_key",
     "get_memory_spec",
     "graph_spec",
+    "ingest_document_spec",
     "is_sequence",
     "kind_param",
+    "list_documents_spec",
     "manage_spec",
     "parse_response",
     "pick_workspace",
@@ -55,9 +66,25 @@ __all__ = [
 
 MAX_LEARNINGS_PER_CALL = 25
 MAX_RETRIEVAL_LIMIT = 20
+#: The API caps a document page at 200 rows.
+MAX_DOCUMENT_LIMIT = 200
 
 LEARNING_KINDS = ("semantic", "procedural", "episodic")
+MEMORY_KINDS = ("reference", "episodic", "semantic", "procedural")
 MANAGE_ACTIONS = ("pin", "unpin", "archive", "restore", "forget", "rate", "approve", "reject", "revert")
+DOCUMENT_STATUSES = ("all", "active", "archived", "pending_approval")
+DOCUMENT_SORTS = ("recent", "oldest", "recently_read")
+INDEX_STATUSES = ("all", "queued", "chunked", "indexed", "ready", "failed")
+
+#: Sent on every request as ``User-Agent``.
+#:
+#: This is not cosmetic. Cloudflare's edge in front of ``api.kiomon.com`` bans
+#: urllib's default ``Python-urllib/3.x`` signature, so a client that sends no
+#: ``User-Agent`` gets a **403 (Error 1010, browser_signature_banned)** on every
+#: request — the whole SDK is unusable without this header. Any explicit value
+#: clears the block, so a caller who wants their own can still override it
+#: through the client's ``headers`` argument.
+USER_AGENT = f"kiomon-python-sdk/{__version__}"
 
 
 @dataclass(frozen=True)
@@ -129,6 +156,142 @@ def batch_draft_spec(*, workspace_id: str, learnings: Sequence[Mapping[str, Any]
         body={"workspace_id": workspace_id, "learnings": list(learnings)},
         write=True,
     )
+
+
+def create_workspace_spec(*, name: str, org_id: str | None) -> Spec:
+    """``POST /api/workspaces``.
+
+    ``org_id`` is optional on the wire: omitted, the API files the workspace
+    under the caller's primary organization. Pass it to place the workspace in a
+    specific org — the caller must be an admin or owner of that org, or the API
+    answers 403.
+    """
+    if not isinstance(name, str) or not name.strip():
+        raise KiomonError("create_workspace requires a non-empty `name`.", code="invalid_request")
+    if org_id is not None and not (isinstance(org_id, str) and org_id.strip()):
+        raise KiomonError("create_workspace: `org_id` must be a non-empty string.", code="invalid_request")
+    body: dict = {"name": name}
+    if org_id is not None:
+        body["org_id"] = org_id
+    return Spec(method="POST", path="/api/workspaces", body=body, write=True)
+
+
+def list_documents_spec(
+    *,
+    limit: int | None,
+    offset: int | None,
+    query: str | None,
+    kind: str | None,
+    tag: str | None,
+    status: str | None,
+    source: str | None,
+    sort: str | None,
+    since: str | None,
+    index_status: str | None,
+    workspace_id: str | None,
+) -> Spec:
+    """``GET /api/documents`` — the metadata-only page projection.
+
+    The remaining filters the route accepts (``type``, ``before``,
+    ``connector_id``, ``callerRole``) are deliberately not surfaced here; reach
+    them through :meth:`Kiomon.request` rather than growing this signature.
+    """
+    if limit is not None and (isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= MAX_DOCUMENT_LIMIT):
+        raise KiomonError(
+            f"list_documents: `limit` must be between 1 and {MAX_DOCUMENT_LIMIT}.", code="invalid_request"
+        )
+    if offset is not None and (isinstance(offset, bool) or not isinstance(offset, int) or offset < 0):
+        raise KiomonError("list_documents: `offset` must be a non-negative integer.", code="invalid_request")
+    if status is not None and status not in DOCUMENT_STATUSES:
+        raise KiomonError(
+            f"list_documents: `status` must be one of: {', '.join(DOCUMENT_STATUSES)}.", code="invalid_request"
+        )
+    if sort is not None and sort not in DOCUMENT_SORTS:
+        raise KiomonError(
+            f"list_documents: `sort` must be one of: {', '.join(DOCUMENT_SORTS)}.", code="invalid_request"
+        )
+    if kind is not None and kind not in MEMORY_KINDS:
+        raise KiomonError(
+            f"list_documents: `kind` must be one of: {', '.join(MEMORY_KINDS)}.", code="invalid_request"
+        )
+    if index_status is not None and index_status not in INDEX_STATUSES:
+        raise KiomonError(
+            f"list_documents: `index_status` must be one of: {', '.join(INDEX_STATUSES)}.", code="invalid_request"
+        )
+    return Spec(
+        method="GET",
+        path="/api/documents",
+        query={
+            "limit": limit,
+            "offset": offset,
+            "q": query,
+            "kind": kind,
+            "tag": tag,
+            "status": status,
+            "source": source,
+            "sort": sort,
+            "since": since,
+            "index_status": index_status,
+            "workspace_id": workspace_id,
+        },
+    )
+
+
+def ingest_document_spec(
+    *,
+    body: str,
+    title: str | None,
+    source_url: str | None,
+    author: str | None,
+    excerpt: str | None,
+    lang: str | None,
+    user_notes: str | None,
+    tags: Sequence[str] | None,
+    kind: str | None,
+    type: str | None,
+    thumbnail_url: str | None,
+    workspace_id: str | None,
+) -> Spec:
+    """``POST /api/documents`` — the write path for saved source material.
+
+    Distinct from :func:`batch_draft_spec`, which is the *memory* write path.
+    A learning goes through the write gate and may land in the Review Inbox; a
+    document is stored and indexed directly, and is what ``search_memory``
+    returns.
+    """
+    if not isinstance(body, str) or not body.strip():
+        raise KiomonError("ingest_document requires a non-empty `body`.", code="invalid_request")
+    if kind is not None and kind not in MEMORY_KINDS:
+        raise KiomonError(
+            f"ingest_document: `kind` must be one of: {', '.join(MEMORY_KINDS)}.", code="invalid_request"
+        )
+    if tags is not None and (not is_sequence(tags) or any(not isinstance(t, str) for t in tags)):
+        raise KiomonError("ingest_document: `tags` must be a sequence of strings.", code="invalid_request")
+
+    payload: dict = {"body": body}
+    for key, value in (
+        ("title", title),
+        ("source_url", source_url),
+        ("author", author),
+        ("excerpt", excerpt),
+        ("lang", lang),
+        ("user_notes", user_notes),
+        ("kind", kind),
+        ("type", type),
+        ("thumbnail_url", thumbnail_url),
+        ("workspace_id", workspace_id),
+    ):
+        if value is not None:
+            payload[key] = value
+    if tags is not None:
+        payload["tags"] = list(tags)
+    return Spec(method="POST", path="/api/documents", body=payload, write=True)
+
+
+def delete_document_spec(id: str) -> Spec:
+    """``DELETE /api/documents/:id`` — row, blob, chunks, tags, links and vectors."""
+    require_id(id, "delete_document")
+    return Spec(method="DELETE", path=f"/api/documents/{_quote(id)}", write=True)
 
 
 def manage_spec(*, id: str, action: str, value: int | None) -> Spec:
@@ -307,7 +470,7 @@ def pick_workspace(workspaces: Sequence[Mapping[str, Any]]) -> str:
     """
     if len(workspaces) == 0:
         raise KiomonError(
-            "This account has no workspaces yet. Create one in the Kiomon dashboard.",
+            "This account has no workspaces yet. Call create_workspace() to make one.",
             code="not_found",
         )
     if len(workspaces) > 1:
@@ -343,7 +506,7 @@ def build_headers(
     write: bool,
     options: CallOptions | None,
 ) -> dict:
-    headers: dict = {"Accept": "application/json", "X-Agent-Id": agent_id}
+    headers: dict = {"Accept": "application/json", "User-Agent": USER_AGENT, "X-Agent-Id": agent_id}
     headers.update(extra_headers)
     headers.update(auth)
     if body is not None:

@@ -118,6 +118,63 @@ Writes go through the same **write gate** as the dashboard: a high-confidence le
 may activate immediately, anything uncertain lands in the Review Inbox rather than
 silently becoming knowledge.
 
+## Workspace and document verbs
+
+Four more verbs have no MCP equivalent. They exist because the twelve above are not
+self-sufficient: without them a caller cannot make the workspace `select_workspace`
+needs, or put anything in it for `search_memory` to find.
+
+| Method | What it does |
+|---|---|
+| `create_workspace(name=…, org_id=…)` | Create a workspace, optionally inside an organization |
+| `ingest_document(body=…, title=…, …)` | Save a document — the write path for source material |
+| `list_documents(query=…, kind=…, …)` | List documents, newest first |
+| `delete_document(id)` | Delete a document and everything derived from it |
+
+```python
+from kiomon import Kiomon
+
+kiomon = Kiomon(api_key=key)
+
+# 1. Make a workspace inside your organization.
+org = kiomon.list_workspaces()["workspaces"][0]["org_id"]
+ws = kiomon.create_workspace(name="Research", org_id=org)
+kiomon.select_workspace(ws["id"])
+
+# 2. Put something in it. Indexing is asynchronous, so this returns before the
+#    document is searchable — give it a few seconds.
+saved = kiomon.ingest_document(
+    body="# Deploy runbook\n\nRoll back with `wrangler rollback <version>`.",
+    title="Deploy runbook",
+    source_url="https://internal.example/runbooks/deploy",
+    tags=["runbook", "deploy"],
+    kind="procedural",
+)
+
+# 3. Find it.
+for hit in kiomon.search_memory(query="how do we roll back?")["results"]:
+    print(hit["title"], hit["rank"])
+```
+
+### Two behaviours worth knowing before you rely on them
+
+**Dedup is by `source_url` only.** Re-saving the same URL returns
+`duplicate: True` and the **existing** id rather than an error. A save with no
+`source_url` is given a synthetic unique one, so it *never* dedups — repeats pile up as
+separate documents. Pass `source_url` if you want the second save to be a no-op.
+
+**`list_documents` shows only indexed documents by default.** A document you just saved
+is `queued` and therefore absent from the list until it finishes chunking. Pass
+`index_status="all"` to see the pipeline rather than just its output — that is also the
+only way to find a save that failed, because a `failed` row is invisible to the default
+filter forever.
+
+```python
+kiomon.list_documents()                       # findable only (chunked / indexed / ready)
+kiomon.list_documents(index_status="all")     # include queued and failed
+kiomon.list_documents(index_status="failed")  # just the failures
+```
+
 ## Workspaces
 
 Pass `workspace_id` to the constructor, or rely on resolution: exactly one workspace
@@ -127,6 +184,9 @@ into the wrong brain is worse than failing.
 ```python
 kiomon = Kiomon(api_key=key).select_workspace("ws_…")
 ```
+
+If the account has none yet, `create_workspace()` makes one — you do not need to leave
+the SDK for the dashboard.
 
 ## Errors
 
@@ -241,7 +301,8 @@ both clients are context managers (`with` / `async with`) that call the transpor
 - Method names are the **MCP tool names** (`retrieve_memory`, `manage_memory`, …).
 - Local validation matches the TypeScript SDK exactly: constructor credentials, ids and
   queries, the 25-learning ceiling, the 0–1 confidence range, the manage-action
-  vocabulary, and the retrieval limit ceiling. Everything else is the server's contract
+  vocabulary, the retrieval and document page ceilings, and the `status` / `sort` /
+  `kind` / `index_status` vocabularies. Everything else is the server's contract
   and is validated there.
 - Python-specific conventions: `None` means "not set" and the key is omitted from the
   wire (matching the TypeScript SDK's `undefined`); timeouts are **seconds**, not

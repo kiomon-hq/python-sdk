@@ -25,9 +25,17 @@ __all__ = [
     "CallOptions",
     "ConflictNote",
     "ContextPacket",
+    "DeleteResult",
+    "DocumentCounts",
+    "DocumentListItem",
+    "DocumentList",
+    "DocumentSort",
+    "DocumentStatus",
     "EvidenceRef",
     "GraphRelation",
     "GraphResult",
+    "IndexStatus",
+    "IngestResult",
     "JsonObject",
     "Learning",
     "LearningKind",
@@ -51,6 +59,20 @@ __all__ = [
 #: Memory kind. ``semantic`` = a fact, ``procedural`` = a routine,
 #: ``episodic`` = a moment, ``reference`` = saved source material.
 MemoryKind = Literal["reference", "episodic", "semantic", "procedural"]
+
+#: Document lifecycle state, for :meth:`Kiomon.list_documents`.
+DocumentStatus = Literal["all", "active", "archived", "pending_approval"]
+
+#: Indexing state, for :meth:`Kiomon.list_documents`.
+#:
+#: ``chunked``, ``indexed`` and ``ready`` are **findable** — search can see them.
+#: ``queued`` and ``failed`` are not, and ``list_documents`` hides them unless
+#: ``index_status="all"`` is asked for explicitly. That default is why a document
+#: you just ingested is missing from the list until it finishes chunking.
+IndexStatus = Literal["all", "queued", "chunked", "indexed", "ready", "failed"]
+
+#: Page ordering, for :meth:`Kiomon.list_documents`.
+DocumentSort = Literal["recent", "oldest", "recently_read"]
 
 #: The kinds a learning can be saved as (``reference`` is ingested, not written).
 LearningKind = Literal["semantic", "procedural", "episodic"]
@@ -106,19 +128,33 @@ class _WorkspaceRequired(TypedDict):
 
 
 class Workspace(_WorkspaceRequired, total=False):
+    """A workspace.
+
+    The list route enriches the row; the create route does not. ``documents``,
+    ``my_role`` and ``is_default`` are the fields a caller needs to choose a
+    workspace, and they are present only on :meth:`Kiomon.list_workspaces`
+    responses — :meth:`Kiomon.create_workspace` returns the bare row.
+    """
+
     org_id: str | None
+    #: ``autonomous`` or ``review`` — whether drafts activate or wait in the inbox.
+    review_mode: str
+    my_role: str
+    org_name: str | None
+    org_role: str | None
+    members: int
+    documents: int
+    storage_bytes: int
+    #: Human-readable size (``"1.68 KB"``), the display twin of ``storage_bytes``.
+    storage: str
+    is_default: bool
 
 
 class WorkspaceList(TypedDict):
     workspaces: list[Workspace]
 
 
-class MemoryDocument(TypedDict):
-    """A stored memory/document. Mirrors the worker's ``Document`` contract.
-
-    ``tags`` and ``headings`` arrive as JSON strings, not arrays.
-    """
-
+class _MemoryDocumentRequired(TypedDict):
     id: str
     source_url: str
     title: str | None
@@ -145,6 +181,75 @@ class MemoryDocument(TypedDict):
     expires_at: str | None
 
 
+class MemoryDocument(_MemoryDocumentRequired, total=False):
+    """A stored memory/document. Mirrors the worker's ``Document`` contract.
+
+    ``tags``, ``headings`` and ``memory_metadata`` arrive as JSON **strings**,
+    not arrays or objects — ``json.loads`` them to use them.
+
+    The row is the server's, not the SDK's, so the fields below are declared
+    optional: a given document carries whichever of them its lifecycle has
+    reached. ``index_status`` / ``ingest_status`` / ``enrich_status`` are the
+    processing states, and ``index_ready_at`` is the one that answers "is this
+    findable yet?" — ``strength`` and ``retrieval_count`` are the memory-decay
+    signals.
+    """
+
+    #: JSON array string, like ``tags``.
+    headings: str | None
+    #: JSON object string.
+    memory_metadata: str | None
+    user_id: str
+    updated_at: str | None
+    lang: str | None
+    type: str | None
+    thumbnail_url: str | None
+    is_large: int
+    #: Set when the body lives in blob storage rather than the row.
+    r2_key: str | None
+    byte_size: int
+    occurred_at: str | None
+    pending_suggestion_count: int
+    caller_role: str
+    #: Indexing: ``queued`` · ``chunked`` · ``indexed`` · ``ready`` · ``failed``.
+    #: Only ``chunked``/``indexed``/``ready`` are findable — see :data:`IndexStatus`.
+    index_status: str
+    index_error: str | None
+    index_attempts: int
+    index_changed_at: str | None
+    index_ready_at: str | None
+    #: Ingest (the phase before indexing), same vocabulary.
+    ingest_status: str
+    ingest_error: str | None
+    ingest_attempts: int
+    ingest_changed_at: str | None
+    ingest_pages: int | None
+    ingest_parser_name: str | None
+    ingest_parser_version: str | None
+    #: Enrichment: extraction of entities, claims and domains.
+    enrich_status: str
+    enrich_error: str | None
+    failed_at: str | None
+    failure_class: str | None
+    infra_retries: int
+    first_stranded_at: str | None
+    last_progress_at: str | None
+    last_read_at: str | None
+    #: Recovery-lease bookkeeping, written by the sweep jobs.
+    lease_stage: str | None
+    lease_until: str | None
+    chunk_strategy_version: int
+    embed_model: str | None
+    attention_reason: str | None
+    next_attention_at: str | None
+    #: Auto-linking state and degree.
+    link_status: str | None
+    link_count: int
+    last_link_scan_at: str | None
+    connector_id: str | None
+    connector_metadata: str | None
+
+
 class _SearchHitRequired(TypedDict):
     id: str
     title: str | None
@@ -157,11 +262,26 @@ class _SearchHitRequired(TypedDict):
 
 
 class SearchHit(_SearchHitRequired, total=False):
+    """One search result.
+
+    ``rank`` is the fused reciprocal-rank score: the field to sort, threshold or
+    display when relevance matters. It is **not** comparable across queries —
+    RRF sums ``1/(k + rank)`` per leg, so it is only meaningful within one
+    response.
+    """
+
     source: str | None
     type: str | None
     kind: str
     #: Writer-declared confidence; absent/null for ingested content with no score.
     confidence: float | None
+    #: Fused RRF score. Compare within a response, never across responses.
+    rank: float
+    #: 1 when the body lives in blob storage and ``body`` is truncated or absent.
+    is_large: int
+    workspace_id: str
+    #: The stored body. Present for small documents; absent when ``is_large``.
+    body: str | None
 
 
 class _SearchResponseRequired(TypedDict):
@@ -169,21 +289,30 @@ class _SearchResponseRequired(TypedDict):
 
 
 class SearchResponse(_SearchResponseRequired, total=False):
-    #: Present on some responses; kept optional rather than asserted.
-    total: int
+    #: The query the server actually ran, echoed back.
+    query: str
 
 
-class PacketItem(TypedDict):
-    """One retrieved memory inside a context packet, with provenance."""
-
+class _PacketItemRequired(TypedDict):
     memory_id: str
     kind: str
     claim: str
     confidence: float
     authority: str
     applicability: Applicability
-    condition: str | None
-    source_ref: str | None
+
+
+class PacketItem(_PacketItemRequired, total=False):
+    """One retrieved memory inside a context packet, with provenance.
+
+    ``condition`` is present **only** when ``applicability`` is
+    ``"conditional"`` — the server omits the key entirely otherwise, so it is
+    not merely nullable. ``source_ref`` is likewise omitted when a memory has no
+    source.
+    """
+
+    condition: str
+    source_ref: str
 
 
 class EvidenceRef(TypedDict):
@@ -254,6 +383,11 @@ class _BatchDraftRequired(TypedDict):
 
 
 class BatchDraftResult(_BatchDraftRequired, total=False):
+    #: Titles of learnings the write gate dropped rather than drafted.
+    discarded: list[str]
+    #: How many learnings were folded into an existing memory instead of inserted.
+    merged: int
+    #: Dashboard path to the Review Inbox. Sent only when ``pending`` is non-empty.
     review_inbox_url: str
 
 
@@ -263,9 +397,112 @@ class _GraphRequired(TypedDict):
 
 
 class GraphResult(_GraphRequired, total=False):
+    """A page of the memory graph.
+
+    ``hasMore`` is the pagination signal: without it a truncated walk is
+    indistinguishable from a complete one.
+    """
+
     #: Collapsed ``memory -> entity -> memory`` links — the structure retrieval
     #: walks. camelCase because that is the wire name.
     entityLinks: list[JsonObject]
+    #: Nodes reachable from the centre before ``depth`` was applied.
+    totalNodes: int
+    hasMore: bool
+    depth: int
+
+
+class DocumentCounts(TypedDict):
+    """Per-kind totals for the current filter, computed over the whole match set."""
+
+    total: int
+    reference: int
+    episodic: int
+    semantic: int
+    procedural: int
+    pinned: int
+
+
+class _DocumentListItemRequired(TypedDict):
+    id: str
+    source_url: str
+    title: str | None
+    created_at: str
+    workspace_id: str
+    kind: MemoryKind
+    status: str
+    source: str
+    pinned: int
+
+
+class DocumentListItem(_DocumentListItemRequired, total=False):
+    """One row of the metadata-only list projection.
+
+    ``body`` is deliberately absent — every list surface is metadata-only, and
+    the body lives behind :meth:`Kiomon.get_memory`.
+    """
+
+    user_id: str
+    author: str | None
+    excerpt: str | None
+    tags: str | None
+    lang: str | None
+    user_notes: str | None
+    is_large: int
+    updated_at: str | None
+    pending_suggestion_count: int
+    type: str | None
+    thumbnail_url: str | None
+    connector_metadata: str | None
+    last_read_at: str | None
+    confidence: float | None
+    strength: float
+    memory_metadata: str | None
+    index_status: str
+    index_error: str | None
+    index_attempts: int
+    index_changed_at: str | None
+    ingest_status: str
+    ingest_error: str | None
+    ingest_pages: int | None
+    ingest_changed_at: str | None
+    enrich_status: str
+    failed_at: str | None
+    connector_id: str | None
+
+
+class DocumentList(TypedDict):
+    """One page of documents, with the counts for the current filter."""
+
+    documents: list[DocumentListItem]
+    limit: int
+    offset: int
+    total: int
+    counts: DocumentCounts
+
+
+class IngestResult(TypedDict, total=False):
+    """The outcome of :meth:`Kiomon.ingest_document`.
+
+    A save the API already had answers ``200`` with ``duplicate: true`` and the
+    **existing** ``id`` instead of ``201`` — the dedup is by source URL and body
+    hash, so re-ingesting the same page is a no-op rather than an error. Check
+    ``duplicate`` before treating the id as new.
+    """
+
+    id: str
+    #: Tags the server resolved, including any it added itself. Absent on a dedup hit.
+    tags: list[str]
+    #: Present only on a dedup hit, where it is always ``true``.
+    duplicate: bool
+    #: Present only on a dedup hit: when the original was saved.
+    created_at: str
+
+
+class DeleteResult(TypedDict):
+    """The outcome of :meth:`Kiomon.delete_document`."""
+
+    deleted: bool
 
 
 class OutcomeItem(TypedDict):

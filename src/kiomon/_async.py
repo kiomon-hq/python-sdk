@@ -32,8 +32,12 @@ from ._specs import (
     build_headers,
     build_url,
     context_spec,
+    create_workspace_spec,
+    delete_document_spec,
     get_memory_spec,
     graph_spec,
+    ingest_document_spec,
+    list_documents_spec,
     manage_spec,
     parse_response,
     pick_workspace,
@@ -49,7 +53,13 @@ from .types import (
     BatchDraftResult,
     CallOptions,
     ContextPacket,
+    DeleteResult,
+    DocumentList,
+    DocumentSort,
+    DocumentStatus,
     GraphResult,
+    IndexStatus,
+    IngestResult,
     JsonObject,
     Learning,
     ManageAction,
@@ -60,6 +70,7 @@ from .types import (
     RetrievalIntent,
     RiskLevel,
     SearchResponse,
+    Workspace,
     WorkspaceContext,
     WorkspaceList,
 )
@@ -257,6 +268,144 @@ class AsyncKiomon:
     async def list_workspaces(self, *, options: CallOptions | None = None) -> WorkspaceList:
         """Every workspace this credential can reach."""
         return await self._send(Spec(method="GET", path="/api/workspaces"), options)
+
+    # ── Workspace and document verbs ───────────────────────────────────────────
+    #
+    # SDK-only: the MCP toolset has no equivalent, and without these the memory
+    # verbs cannot be used from a cold start — a caller could not create the
+    # workspace `select_workspace` needs, nor put anything in it for
+    # `search_memory` to find.
+
+    async def create_workspace(
+        self,
+        *,
+        name: str,
+        org_id: str | None = None,
+        options: CallOptions | None = None,
+    ) -> Workspace:
+        """Create a workspace, optionally inside an organization.
+
+        Omit ``org_id`` to file it under the caller's primary organization; pass
+        one to place it in a specific org, where the caller must be an admin or
+        owner or the API answers 403. Returns the bare workspace row — the
+        enriched fields (``documents``, ``my_role``, ``is_default``) come from
+        :meth:`list_workspaces`, not from this call.
+
+        The plan's workspace ceiling applies: a Free organization over its limit
+        gets 402 ``quota_exceeded``, not a silent no-op.
+        """
+        return await self._send(create_workspace_spec(name=name, org_id=org_id), options)
+
+    async def ingest_document(
+        self,
+        *,
+        body: str,
+        title: str | None = None,
+        source_url: str | None = None,
+        author: str | None = None,
+        excerpt: str | None = None,
+        lang: str | None = None,
+        user_notes: str | None = None,
+        tags: Sequence[str] | None = None,
+        kind: MemoryKind | None = None,
+        type: str | None = None,
+        thumbnail_url: str | None = None,
+        workspace_id: str | None = None,
+        options: CallOptions | None = None,
+    ) -> IngestResult:
+        """Save a document — the write path for source material.
+
+        Distinct from :meth:`draft_memory`: a learning goes through the write
+        gate and may land in the Review Inbox, while a document is stored and
+        indexed directly. Documents are what :meth:`search_memory` returns.
+
+        Indexing is asynchronous, so the row is not searchable when this
+        returns. Expect a lag — seconds, not instant — before the id shows up in
+        a search.
+
+        Dedup is by ``source_url`` **only**. Re-saving the same URL answers with
+        ``duplicate: True`` and the **existing** id rather than an error — but a
+        save with no ``source_url`` is given a synthetic unique one, so it never
+        dedups and repeats will pile up as separate documents. Pass ``source_url``
+        if you want the second save to be a no-op.
+        """
+        return await self._send(
+            ingest_document_spec(
+                body=body,
+                title=title,
+                source_url=source_url,
+                author=author,
+                excerpt=excerpt,
+                lang=lang,
+                user_notes=user_notes,
+                tags=tags,
+                kind=kind,
+                type=type,
+                thumbnail_url=thumbnail_url,
+                workspace_id=self._workspace_for(workspace_id),
+            ),
+            options,
+        )
+
+    async def list_documents(
+        self,
+        *,
+        query: str | None = None,
+        kind: MemoryKind | None = None,
+        tag: str | None = None,
+        status: DocumentStatus | None = None,
+        source: str | None = None,
+        sort: DocumentSort | None = None,
+        since: str | None = None,
+        index_status: IndexStatus | None = None,
+        limit: int | None = None,
+        offset: int | None = None,
+        workspace_id: str | None = None,
+        options: CallOptions | None = None,
+    ) -> DocumentList:
+        """List documents, newest first by default.
+
+        Metadata only — the body is not in the projection, so read it with
+        :meth:`get_memory` when you need it. ``counts`` reports the per-kind
+        totals for the current filter over the whole match set, not just the
+        page.
+
+        **Only indexed documents are listed by default.** ``queued`` and
+        ``failed`` rows are hidden, so a document you just saved is absent until
+        it finishes chunking — pass ``index_status="all"`` to see the pipeline
+        rather than just its output. That is also the way to find a save that
+        failed: it is invisible to the default filter forever.
+        """
+        return await self._send(
+            list_documents_spec(
+                limit=limit,
+                offset=offset,
+                query=query,
+                kind=kind,
+                tag=tag,
+                status=status,
+                source=source,
+                sort=sort,
+                since=since,
+                index_status=index_status,
+                workspace_id=self._workspace_for(workspace_id),
+            ),
+            options,
+        )
+
+    async def delete_document(
+        self,
+        id: str,
+        *,
+        options: CallOptions | None = None,
+    ) -> DeleteResult:
+        """Delete a document and everything derived from it.
+
+        The row, its blob, its chunks, tags, links and both chunk- and
+        document-level vectors. Irreversible — prefer ``archive`` via
+        :meth:`manage_memory` when the intent is to hide rather than remove.
+        """
+        return await self._send(delete_document_spec(id), options)
 
     async def retrieve_memory(
         self,
