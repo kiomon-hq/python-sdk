@@ -51,6 +51,7 @@ from ._specs import (
     graph_spec,
     ingest_document_spec,
     list_documents_spec,
+    list_memories_spec,
     manage_spec,
     parse_response,
     pick_workspace,
@@ -79,6 +80,8 @@ from .types import (
     ManageAction,
     MemoryDocument,
     MemoryKind,
+    MemoryList,
+    MemoryStatus,
     Outcome,
     OutcomeItem,
     RetrievalIntent,
@@ -260,10 +263,19 @@ class Kiomon:
         id: str,
         relation: str | None = None,
         depth: int | None = None,
+        workspace_id: str | None = None,
         options: CallOptions | None = None,
     ) -> GraphResult:
         """Multi-hop traversal of the memory graph from a centre node."""
-        return self._send(graph_spec(id=id, relation=relation, depth=depth), options)
+        return self._send(
+            graph_spec(
+                id=id,
+                relation=relation,
+                depth=depth,
+                workspace_id=self._workspace_for(workspace_id),
+            ),
+            options,
+        )
 
     def reflect_session(
         self,
@@ -449,6 +461,41 @@ class Kiomon:
         :meth:`manage_memory` when the intent is to hide rather than remove.
         """
         return self._send(delete_document_spec(id), options)
+
+    def list_memories(
+        self,
+        *,
+        status: MemoryStatus | None = None,
+        kind: MemoryKind | None = None,
+        query: str | None = None,
+        limit: int | None = None,
+        offset: int | None = None,
+        workspace_id: str | None = None,
+        options: CallOptions | None = None,
+    ) -> MemoryList:
+        """List memories and files by state — the listing a query cannot express.
+
+        ``status`` defaults to ``"pending_approval"``, the **Review Inbox**:
+        drafts the write gate held back for a decision. They are not retrievable
+        — nothing is until it is approved — so a search that returns nothing is
+        not proof the brain is empty. Use ``"active"`` for live knowledge,
+        ``"archived"`` for what was hidden or quarantined, ``"all"`` for
+        everything.
+
+        Work the inbox with
+        :meth:`manage_memory` (``action="approve"`` or ``"reject"``).
+        """
+        return self._send(
+            list_memories_spec(
+                status=status,
+                kind=kind,
+                query=query,
+                limit=limit,
+                offset=offset,
+                workspace_id=self._workspace_for(workspace_id),
+            ),
+            options,
+        )
 
     def retrieve_memory(
         self,

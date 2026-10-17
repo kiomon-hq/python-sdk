@@ -94,42 +94,56 @@ kiomon = Kiomon(token=lambda: get_kiomon_token_for(user))
 > worker's default-deny allowlist to the memory routes. `request()` is not a general
 > escape hatch in that mode.
 
-## The 12 verbs
+## The 14 verbs
 
 The Python method names are the hosted MCP tool names, so a capability you have in an
-agent you also have here.
+agent you also have here. The MCP column is the tool that does the same thing on the
+server side.
 
-| Method | What it does |
-|---|---|
-| `retrieve_memory(intent=…, query=…, …)` | Intent-aware context packet with provenance, conflicts and warnings |
-| `search_memory(query=…, kind=…, limit=…)` | Hybrid keyword + semantic search |
-| `get_memory(id)` | One memory by id |
-| `get_workspace_context(topic=…)` | Orientation pack — "where was I" |
-| `get_latest_briefing()` | The most recent proactive briefing |
-| `reflect_session(learnings=…)` | Save up to 25 learnings through the autonomous write gate |
-| `draft_memory(learning)` | Save one learning |
-| `manage_memory(id=…, action=…, value=…)` | `pin` · `unpin` · `archive` · `restore` · `forget` · `rate` · `approve` · `reject` · `revert` |
-| `explore_memory_graph(id=…, relation=…, depth=…)` | Multi-hop traversal of the memory graph |
-| `record_outcome(outcome=…, items=…)` | Report whether retrieved memories helped |
-| `list_workspaces()` | Every workspace this credential can reach |
-| `select_workspace(id)` | Bind the client to a workspace (chainable) |
+| Method | MCP tool | What it does |
+|---|---|---|
+| `retrieve_memory(intent=…, query=…, …)` | `retrieve_memory` | Intent-aware context packet with provenance, conflicts and warnings |
+| `search_memory(query=…, kind=…, limit=…)` | `search_memory` | Hybrid keyword + semantic search |
+| `get_memory(id)` | `get_memory` | One memory by id |
+| `list_memories(status=…, kind=…, query=…)` | `list_memories` | List by state — the Review Inbox by default |
+| `ingest_document(body=…, title=…, …)` | `save_document` | Save source material as a File |
+| `get_workspace_context(topic=…)` | `get_workspace_context` | Orientation pack — "where was I" |
+| `get_latest_briefing()` | `get_latest_briefing` | The most recent proactive briefing |
+| `reflect_session(learnings=…)` | `reflect_session` | Save up to 25 learnings through the autonomous write gate |
+| `draft_memory(learning)` | `draft_memory` | Save one learning |
+| `manage_memory(id=…, action=…, value=…)` | `manage_memory` | `pin` · `unpin` · `archive` · `restore` · `forget` · `rate` · `approve` · `reject` · `revert` |
+| `explore_memory_graph(id=…, relation=…, depth=…)` | `explore_memory_graph` | Multi-hop traversal of the memory graph |
+| `record_outcome(outcome=…, items=…)` | `record_outcome` | Report whether retrieved memories helped |
+| `list_workspaces()` | `list_workspaces` | Every workspace this credential can reach |
+| `select_workspace(id)` | `select_workspace` | Bind the client to a workspace (chainable) |
 
 Writes go through the same **write gate** as the dashboard: a high-confidence learning
 may activate immediately, anything uncertain lands in the Review Inbox rather than
-silently becoming knowledge.
+silently becoming knowledge. Nothing in the inbox is retrievable — which is what
+`list_memories()` is for.
 
-## Workspace and document verbs
+```python
+# Work the inbox a write gate fills. `status` defaults to pending_approval.
+inbox = kiomon.list_memories(kind="semantic", limit=20)
+for draft in inbox["memories"]:
+    print(draft["title"], draft["confidence"], draft["excerpt"])
+if inbox["total"] > len(inbox["memories"]):
+    kiomon.list_memories(offset=20)
 
-Four more verbs have no MCP equivalent. They exist because the twelve above are not
-self-sufficient: without them a caller cannot make the workspace `select_workspace`
-needs, or put anything in it for `search_memory` to find.
+kiomon.manage_memory(id=inbox["memories"][0]["id"], action="approve")
+```
+
+## Three more verbs
+
+These have no tool of their own. Without them the fourteen above are not
+self-sufficient: a caller cannot make the workspace `select_workspace` needs, or read
+the library with the document-only filters.
 
 | Method | What it does |
 |---|---|
 | `create_workspace(name=…, org_id=…)` | Create a workspace, optionally inside an organization |
-| `ingest_document(body=…, title=…, …)` | Save a document — the write path for source material |
-| `list_documents(query=…, kind=…, …)` | List documents, newest first |
-| `delete_document(id)` | Delete a document and everything derived from it |
+| `list_documents(query=…, kind=…, tag=…, …)` | List documents with tag, source, sort and pipeline-state filters |
+| `delete_document(id)` | Delete a document and everything derived from it (the `forget` action, with a typed result) |
 
 ```python
 from kiomon import Kiomon
