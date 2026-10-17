@@ -29,6 +29,7 @@ from .types import CallOptions
 __all__ = [
     "DOCUMENT_SORTS",
     "DOCUMENT_STATUSES",
+    "DEFAULT_MEMORY_PAGE_SIZE",
     "INDEX_STATUSES",
     "LEARNING_KINDS",
     "MANAGE_ACTIONS",
@@ -53,6 +54,7 @@ __all__ = [
     "is_sequence",
     "kind_param",
     "list_documents_spec",
+    "list_memories_spec",
     "manage_spec",
     "parse_response",
     "pick_workspace",
@@ -75,6 +77,9 @@ MANAGE_ACTIONS = ("pin", "unpin", "archive", "restore", "forget", "rate", "appro
 DOCUMENT_STATUSES = ("all", "active", "archived", "pending_approval")
 DOCUMENT_SORTS = ("recent", "oldest", "recently_read")
 INDEX_STATUSES = ("all", "queued", "chunked", "indexed", "ready", "failed")
+#: Page size for :func:`list_memories_spec` when the caller names none. Matches
+#: MCP ``list_memories``, so an agent and a script see the same first page.
+DEFAULT_MEMORY_PAGE_SIZE = 50
 
 #: Sent on every request as ``User-Agent``.
 #:
@@ -140,12 +145,20 @@ def briefing_spec(*, workspace_id: str) -> Spec:
     return Spec(method="GET", path=f"/api/workspaces/{_quote(workspace_id)}/briefings/latest")
 
 
-def graph_spec(*, id: str, relation: str | None, depth: int | None) -> Spec:
+def graph_spec(*, id: str, relation: str | None, depth: int | None, workspace_id: str | None) -> Spec:
     require_id(id, "explore_memory_graph")
     return Spec(
         method="GET",
         path="/api/graph",
-        query={"center_id": id, "depth": depth if depth is not None else 1, "relation": relation},
+        query={
+            "center_id": id,
+            "depth": depth if depth is not None else 1,
+            "relation": relation,
+            # The walk is workspace-scoped on the server, and its default is the
+            # credential's workspace rather than the selected one — sending this
+            # is what keeps the graph the one the caller has been reading.
+            "workspace_id": workspace_id,
+        },
     )
 
 
@@ -292,6 +305,49 @@ def delete_document_spec(id: str) -> Spec:
     """``DELETE /api/documents/:id`` — row, blob, chunks, tags, links and vectors."""
     require_id(id, "delete_document")
     return Spec(method="DELETE", path=f"/api/documents/{_quote(id)}", write=True)
+
+
+def list_memories_spec(
+    *,
+    status: str | None,
+    kind: str | None,
+    query: str | None,
+    limit: int | None,
+    offset: int | None,
+    workspace_id: str | None,
+) -> Spec:
+    """``GET /api/memories`` — the listing a search cannot express.
+
+    ``status`` defaults to ``pending_approval``, the Review Inbox: drafts the
+    write gate held back for a decision. Nothing in it is retrievable, so a
+    search that returns nothing is not evidence the brain is empty.
+    """
+    if limit is not None and (isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= MAX_DOCUMENT_LIMIT):
+        raise KiomonError(
+            f"list_memories: `limit` must be between 1 and {MAX_DOCUMENT_LIMIT}.", code="invalid_request"
+        )
+    if offset is not None and (isinstance(offset, bool) or not isinstance(offset, int) or offset < 0):
+        raise KiomonError("list_memories: `offset` must be a non-negative integer.", code="invalid_request")
+    if status is not None and status not in DOCUMENT_STATUSES:
+        raise KiomonError(
+            f"list_memories: `status` must be one of: {', '.join(DOCUMENT_STATUSES)}.", code="invalid_request"
+        )
+    if kind is not None and kind not in MEMORY_KINDS:
+        raise KiomonError(
+            f"list_memories: `kind` must be one of: {', '.join(MEMORY_KINDS)}.", code="invalid_request"
+        )
+    return Spec(
+        method="GET",
+        path="/api/memories",
+        query={
+            "status": status if status is not None else "pending_approval",
+            "kind": kind,
+            "q": query,
+            "limit": limit if limit is not None else DEFAULT_MEMORY_PAGE_SIZE,
+            "offset": offset,
+            "workspace_id": workspace_id,
+        },
+    )
 
 
 def manage_spec(*, id: str, action: str, value: int | None) -> Spec:

@@ -42,6 +42,9 @@ __all__ = [
     "ManageAction",
     "MemoryDocument",
     "MemoryKind",
+    "MemoryList",
+    "MemoryStatus",
+    "MemorySummary",
     "Outcome",
     "OutcomeItem",
     "PacketItem",
@@ -413,7 +416,12 @@ class GraphResult(_GraphRequired, total=False):
 
 
 class DocumentCounts(TypedDict):
-    """Per-kind totals for the current filter, computed over the whole match set."""
+    """Per-kind totals for the current filter.
+
+    The API computes these on the first page only, to save a query on every
+    subsequent page: with ``offset > 0`` every field comes back ``0``, not the
+    real totals. ``total`` on the enclosing list is always correct.
+    """
 
     total: int
     reference: int
@@ -485,9 +493,10 @@ class IngestResult(TypedDict, total=False):
     """The outcome of :meth:`Kiomon.ingest_document`.
 
     A save the API already had answers ``200`` with ``duplicate: true`` and the
-    **existing** ``id`` instead of ``201`` — the dedup is by source URL and body
-    hash, so re-ingesting the same page is a no-op rather than an error. Check
-    ``duplicate`` before treating the id as new.
+    **existing** ``id`` instead of ``201``. Dedup is by source URL **within a
+    workspace**, so re-ingesting the same page is a no-op rather than an error;
+    a save with no ``source_url`` is given a synthetic unique one and never
+    dedups. Check ``duplicate`` before treating the id as new.
     """
 
     id: str
@@ -503,6 +512,43 @@ class DeleteResult(TypedDict):
     """The outcome of :meth:`Kiomon.delete_document`."""
 
     deleted: bool
+
+
+#: The state a listing selects. One type rather than two that must keep agreeing,
+#: since documents and memories share the vocabulary.
+MemoryStatus = DocumentStatus
+
+
+class MemorySummary(TypedDict):
+    """One row of the memory listing — the card shape, not the full document.
+
+    The body is absent by design (read it with :meth:`Kiomon.get_memory`), and
+    ``tags`` arrives as a JSON string, as it does everywhere else on the wire.
+    """
+
+    id: str
+    title: str | None
+    excerpt: str | None
+    kind: MemoryKind
+    status: str
+    pinned: int
+    tags: str | None
+    source: str
+    source_url: str
+    workspace_id: str
+    created_at: str
+    confidence: float | None
+    memory_metadata: str | None
+
+
+class MemoryList(TypedDict):
+    """One page of memories. ``status`` is echoed back, since it defaulted."""
+
+    memories: list[MemorySummary]
+    status: MemoryStatus
+    limit: int
+    offset: int
+    total: int
 
 
 class OutcomeItem(TypedDict):
